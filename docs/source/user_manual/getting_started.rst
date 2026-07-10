@@ -36,21 +36,15 @@ Enter the API key for each integrator
 Now that the ``PriceCollector`` class has been created, we need to connect to one 
 or more integrators via an API key. 
 
-Connection to Molport via API key (the following credentials are examples from Molport API documentations, and users need to obtain their personal credentials from Molport platform):
+Connection to Molport via API key (the following credential is an example from Molport's API documentation, and users need to obtain their personal credential from the Molport platform):
 
 .. code:: python3
-    
+
     pc.setMolportApiKey("880d8343-8ui2-418c-9g7a-68b4e2e78c8b")
 
-In the case of Molport, it's also possible to log in with a login and password. 
-ChemSpace and Mcule support only API keys.
+Molport, ChemSpace, and Mcule all authenticate via API key only.
 
-.. code:: python3
-    
-    pc.setMolportUsername("john.spade")
-    pc.setMolportPassword("fasdga34a3")
-
-To check the status of each key, run the : 
+To check the status of each key, run the :
 
 .. code:: python3
     
@@ -97,22 +91,38 @@ Possible Outputs:
     # API Key is Set but not correct:
     Check: Molport api key is incorrect.
 
-If the credentials checked are correct, then it's possible 
-to run the method :mod:`collect()` to obtain the price information 
-found on the molecule. The prices are given in USD according to 
-the units and quantity entered by the vendor. The units of measurement 
+If the credentials checked are correct, then it's possible
+to run the method :mod:`collect()` to obtain the price information
+found on the molecule. The prices are given in USD according to
+the units and quantity entered by the vendor. The units of measurement
 for quantities are categorized into three families: moles, grams, and liters.
 
 .. code:: python3
 
     all_prices = pc.collect(smiles_list)
 
+Molport's search is a quote, not a raw catalog dump, so it needs to know how much of each
+compound you want and where it would ship to. :mod:`collect()` exposes this as optional
+keyword arguments, defaulting to a 1 g, US-shipped, exact-match, lowest-price quote:
+
+.. code:: python3
+
+    all_prices = pc.collect(
+        smiles_list,
+        molport_amount=1,
+        molport_measure="g",
+        molport_shipping_country="US",
+        molport_shipping_method="consolidated",
+        molport_match_types=["exact"],
+        molport_selection_method="lowest price",
+    )
+
 The output will be a dataframe containing all price information of the molecules in the search list.
 
 +-----------------------+---------+-----------------------+--------+--------+---------+-----------+
 | Input Smiles          | Source  | Supplier Name         | Purity | Amount | Measure | Price_USD |
 +=======================+=========+=======================+========+========+=========+===========+
-| CC(=O)NC1=CC=C(C=C1)O | Molport | "ChemDiv, Inc."       | >90    | 100    | mg      | 407.1     |
+| CC(=O)NC1=CC=C(C=C1)O | Molport | "ChemDiv, Inc."       | 90     | 100    | mg      | 407.1     |
 +-----------------------+---------+-----------------------+--------+--------+---------+-----------+
 | CC(=O)NC1=CC=C(C=C1)O | Molport | MedChemExpress Europe | 98.83  | 10     | g       | 112.8     |
 +-----------------------+---------+-----------------------+--------+--------+---------+-----------+
@@ -132,9 +142,9 @@ The output will be a dataframe containing only the best quantity/price ratio for
 +-----------------------+---------+---------------------+--------+--------+----------+-----------+--------+--------------------+
 | Input Smiles          | Source  | Supplier Name       | Purity | Amount | Measure  | Price_USD | USD/g  | USD/mol            |
 +=======================+=========+=====================+========+========+==========+===========+========+====================+
-| CC(=O)NC1=CC=C(C=C1)O | Molport | Cayman Europe       | >=98   | 500    | g        | 407.1     | 0.22   |                    |
+| CC(=O)NC1=CC=C(C=C1)O | Molport | Cayman Europe       | 98     | 500    | g        | 407.1     | 0.22   |                    |
 +-----------------------+---------+---------------------+--------+--------+----------+-----------+--------+--------------------+
-| O=C(C)Oc1ccccc1C(=O)O | Molport | Cayman Europe       | >=90   | 500    | g        | 112.8     | 0.1606 |                    |
+| O=C(C)Oc1ccccc1C(=O)O | Molport | Cayman Europe       | 90     | 500    | g        | 112.8     | 0.1606 |                    |
 +-----------------------+---------+---------------------+--------+--------+----------+-----------+--------+--------------------+
-| O=C(C)Oc1ccccc1C(=O)O | Molport | Life Chemicals Inc. | >90    | 20     | micromol | 50.0      |        | 3950000.0000000005 |
+| O=C(C)Oc1ccccc1C(=O)O | Molport | Life Chemicals Inc. | 90     | 20     | micromol | 50.0      |        | 3950000.0000000005 |
 +-----------------------+---------+---------------------+--------+--------+----------+-----------+--------+--------------------+

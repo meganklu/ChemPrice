@@ -10,10 +10,6 @@ chemprice.PriceCollector
 
 .. autoclass:: PriceCollector
 
-    .. automethod:: setMolportUsername
-
-    .. automethod:: setMolportPassword
-
     .. automethod:: setMolportApiKey
 
     .. automethod:: setChemSpaceApiKey

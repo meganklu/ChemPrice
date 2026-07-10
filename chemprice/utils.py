@@ -10,167 +10,85 @@ from tqdm import tqdm
 ######################################################################
 
 
-# Collects molport ids from the given list smiles (we will use this ids to search)
-def molport_get_ids(instance, smiles_list):
-    # List to store t he IDs and SMILES
-    id_smiles_list = []
-
-    molport_username = instance.login['molport_username']
-    molport_password = instance.login['molport_password']
-    molport_api_key = instance.login['molport_api_key']
-        
-    for smiles in tqdm(smiles_list):
-        # Data to send to the Molport server
-        if molport_username != None:
-            payload = {
-                "User Name": molport_username,
-                "Authentication Code": molport_password,
-                "Structure": smiles,
-                "Search Type": 5, # Perfect research
-                "Maximum Search Time": 60000,
-                "Maximum Result Count": 1000,
-                "Chemical Similarity Index": 0.9
-            }
-
-        else:
-            payload = {
-                "API Key": molport_api_key,
-                "Structure": smiles,
-                "Search Type": 5, # Perfect research
-                "Maximum Search Time": 60000,
-                "Maximum Result Count": 1000,
-                "Chemical Similarity Index": 0.9
-            }
-
-        # Send the request to the Molport server
-        r = requests.post('https://api.molport.com/api/chemical-search/search', json=payload)
-
-        # Get the Python dictionary from the server response
-        response = r.json()
-
-        if response["Result"]["Status"] == 1:
-            molecules = response["Data"]["Molecules"]
-
-            # Iterate over the molecules and their information
-            for molecule in molecules:
-                molecule_id = molecule["Id"]
-                id_smiles_list.append((molecule_id, smiles))
-
-    df = pd.DataFrame(id_smiles_list, columns=["ID", "Input SMILES"])
-
-    return df
-
-
-######################################################################
-######################################################################
-
-
-#cleans the purity text
-def process_purity(value):
-    if value == "('',)":
-        return ""
-    else:
-        return value.strip('\'(%\'),')
-
-# standardize the price and purity columns with chemspace data   
-def molport_standardize_columns(data):
-    
-    data = data.astype(str)
-    
-    # Apply the custom function to the 'Purity' column
-    data['Purity'] = data['Purity'].apply(process_purity)
-
-    # Create new columns Price_USD and Price_EUR with empty strings
-    data['Price_USD'] = ""
-
-    # Replace relevant values with corresponding prices
-    data.loc[data['Currency'] == 'USD', 'Price_USD'] = data.loc[data['Currency'] == 'USD', 'Price']
-
-    # Remove the Price and Currency columns
-    data.drop(['Price', 'Currency'], axis=1, inplace=True)
-    
-    return data
-
-
-######################################################################
-######################################################################
-
-
-# Collects prices for the given ids and coverts them into dataframe
-def molport_collect_prices(instance, molecule_ids):
+# Collects prices for the given SMILES from Molport's v1 list-searches API
+def molport_collect_prices(instance, smiles_list, amount=1, min_amount=None, measure="g", shipping_country="US",
+                            shipping_method="consolidated", match_types=None, selection_method="lowest price",
+                            poll_interval=2, poll_timeout=300):
     """
-    Collects price data for molecules from Molport API.
+    Collects price data for molecules from Molport's v1 REST API (POST /v1/list-searches).
+
+    Submits every SMILES in a single batched search; Molport itself selects offers
+    according to selection_method across its full supplier network, so no supplier
+    category is silently skipped the way the old "Screening Block Suppliers"-only
+    integration was.
 
     :param instance: The PriceCollector instance containing API credentials.
-    :param molecule_ids: DataFrame containing molecule IDs and SMILES.
+    :param smiles_list: list containing molecule SMILES.
+    :param min_amount: Minimum acceptable amount; defaults to ``amount`` (the API requires
+        this field even though its own OpenAPI spec documents it as optional).
     :type instance: PriceCollector
-    :type molecule_ids: pandas.DataFrame
+    :type smiles_list: list
     :return: DataFrame containing collected price data.
     :rtype: pandas.DataFrame
     """
-    all_molecules_data = []
+    columns = ["Source", "Input SMILES", "SMILES", "Supplier Name", "Purity", "Amount", "Measure", "Price_USD"]
 
-    molport_username = instance.login['molport_username']
-    molport_password = instance.login['molport_password']
-    molport_api_key = instance.login['molport_api_key']
+    if not smiles_list:
+        return pd.DataFrame([], columns=columns)
 
-    for _, row in tqdm(molecule_ids.iterrows(),total=len(molecule_ids)):
-        molecule_id = row['ID']
-        smiles = row['Input SMILES']
+    if match_types is None:
+        match_types = ["exact"]
 
-        if molport_username != None:
-            # Molport API URL using the API key and molecule ID
-            url = f'https://api.molport.com/api/molecule/load?molecule={molecule_id}&username={molport_username}&authenticationcode={molport_password}'
-        else:
-            url = f'https://api.molport.com/api/molecule/load?molecule={molecule_id}&apikey={molport_api_key}'
+    if min_amount is None:
+        min_amount = amount
 
-        # Send the POST request to the Molport API
-        response = requests.post(url)
+    headers = {"X-API-Key": instance.login['molport_api_key']}
+    payload = {
+        "search_items_type": "smiles",
+        "search_items": smiles_list,
+        "amount": amount,
+        "min_amount": min_amount,
+        "measure": measure,
+        "shipping_country": shipping_country,
+        "shipping_method": shipping_method,
+        "match_types": match_types,
+        "selection_method": selection_method,
+    }
 
-        # Check the response status
-        if response.status_code == 200:
-            # The request was successful
-            data = response.json()
-            data['Data']['Molecule']['Input SMILES'] = smiles
-            all_molecules_data.append(data)
-        else:
-            # The request failed
-            print(f'Error in the request for molecule {molecule_id}: {response.status_code}')
+    response = requests.post('https://api.molport.com/v1/list-searches', json=payload, headers=headers)
+    if response.status_code not in (200, 201):
+        print(f'Error submitting Molport search: {response.status_code}')
+        return pd.DataFrame([], columns=columns)
 
+    search_key = response.json()["search_key"]
 
-    molport_data = []
-    
-    for data_ in all_molecules_data:
-            input_smiles = data_['Data']['Molecule']['Input SMILES']
-            smiles = data_['Data']['Molecule']['SMILES']
-            supplier_data = data_["Data"]["Molecule"]["Catalogues"]["Screening Block Suppliers"]
+    status_url = f'https://api.molport.com/v1/list-searches/status/{search_key}'
+    elapsed = 0
+    while elapsed < poll_timeout:
+        status = requests.get(status_url, headers=headers).json()
+        if status.get("processing_completed_at"):
+            break
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+    else:
+        print(f'Molport search {search_key} timed out after {poll_timeout} seconds.')
+        return pd.DataFrame([], columns=columns)
 
-            # Write each data row
-            for supplier in supplier_data:
-                supplier_name = supplier["Supplier Name"]
-                catalogues = supplier["Catalogues"]
+    results_response = requests.get(f'https://api.molport.com/v1/list-searches/{search_key}', headers=headers)
+    # "results" is nested under "request" in the live response, despite the
+    # published OpenAPI spec showing it as a top-level field.
+    results = results_response.json().get("request", {}).get("results", [])
 
-                for catalogue in catalogues:
-                    purity = catalogue.get("Purity", ""),
-
-                    last_update_date = catalogue.get("Last Update Date Exact", "")
-                    packings = catalogue["Available Packings"]
-
-                    for packing in packings:
-                        
-                        source = "Molport"
-                        amount = packing.get("Amount", "")
-                        measure = packing.get("Measure", "")
-                        price = packing.get("Price", "")
-                        currency = packing.get("Currency", "")
-                        
-                    molport_data.append((source, input_smiles, smiles, last_update_date, supplier_name, purity, price, amount, measure, currency))
+    # Unmatched SMILES come back as {"search_query": ..., "status": "not found"}
+    # with no price fields at all, rather than being omitted from the array.
+    molport_data = [
+        ("Molport", item.get("search_query", ""), item.get("smiles", ""), item.get("supplier_name", ""),
+         item.get("purity", ""), item.get("qty", ""), item.get("unit", ""), item.get("net_price", ""))
+        for item in results if item.get("status") == "found"
+    ]
 
     # Create a DataFrame with collected data
-    df = pd.DataFrame(molport_data, columns=["Source", "Input SMILES", "SMILES", "Last Update Date Exact", "Supplier Name", "Purity", "Price", "Amount", "Measure", "Currency"])
-
-    # read the file again
-    df = molport_standardize_columns(df)
+    df = pd.DataFrame(molport_data, columns=columns)
 
     #remove if no price rows
     df = df.dropna(subset=["Price_USD"], how='all')
@@ -646,34 +564,32 @@ def filter_csv_by_min_price(df):
 ######################################################################
 
 
-def collect_vendors(instance, smiles_list, progress_output=None, ChemSpace=True, Molport=True, MCule=True):
-    
+def collect_vendors(instance, smiles_list, progress_output=None, ChemSpace=True, Molport=True, MCule=True,
+                     molport_amount=1, molport_measure="g", molport_shipping_country="US",
+                     molport_shipping_method="consolidated", molport_match_types=None,
+                     molport_selection_method="lowest price"):
+
     time_start  = time.perf_counter()
-    
+
     nb_integrator = sum([ChemSpace, Molport, MCule])
     progress = 0
-    
+
     # List of selected suppliers
     selected_providers = []
 
     if Molport:
-        # Get the molecule IDs and print count MolPort
-        print(f"Collecting ID's for given {len(smiles_list)} SMILES from MolPort...")
-        df_molecule_ids = molport_get_ids(instance, smiles_list)
-        smiles_exists = df_molecule_ids['Input SMILES'].nunique()
-        print(f"Total: {smiles_exists} molecules and {len(df_molecule_ids)} conformers are found in MolPort.\n")
-        progress += 3/(4*nb_integrator)
-        if progress_output is not None:
-            progress_output.append(progress) 
-
         # Get the prices and print count from MolPort
-        print(f"Collecting Prices for given {len(smiles_list)} IDs from MolPort...")
-        molport_prices=molport_collect_prices(instance, df_molecule_ids)
+        print(f"Collecting Prices for given {len(smiles_list)} SMILES from MolPort...")
+        molport_prices = molport_collect_prices(instance, smiles_list, amount=molport_amount,
+                                                  measure=molport_measure, shipping_country=molport_shipping_country,
+                                                  shipping_method=molport_shipping_method,
+                                                  match_types=molport_match_types,
+                                                  selection_method=molport_selection_method)
         smiles_with_price = molport_prices.loc[molport_prices['Price_USD'].notnull(), 'Input SMILES'].nunique()
         print(f"Total: {len(molport_prices)} prices for {smiles_with_price} molecules are found in MolPort.\n")
-        progress += 1/(4*nb_integrator)
+        progress += 1/nb_integrator
         if progress_output is not None:
-            progress_output.append(progress) 
+            progress_output.append(progress)
         selected_providers.append(("Molport", molport_prices))
 
     if ChemSpace:

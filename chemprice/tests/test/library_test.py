@@ -23,20 +23,6 @@ class TestPriceCollector(unittest.TestCase):
 
 
 
-    def test_setMolportUsername(self):
-        self.price_collector.setMolportUsername("test_username")
-        self.assertEqual(self.price_collector.login['molport_username'], "test_username")
-
-
-
-
-    def test_setMolportPassword(self):
-        self.price_collector.setMolportPassword("test_password")
-        self.assertEqual(self.price_collector.login['molport_password'], "test_password")
-
-
-
-
     def test_setMolportApiKey(self):
         self.price_collector.setMolportApiKey("880d8343-8ui2-418c-9g7a-68b4e2e78c8b")
         self.assertEqual(self.price_collector.login['molport_api_key'], "880d8343-8ui2-418c-9g7a-68b4e2e78c8b")
@@ -75,7 +61,6 @@ class TestPriceCollector(unittest.TestCase):
         result = self.price_collector.check()
 
         self.assertEqual(result, 0)
-        self.assertFalse(self.price_collector.molport_id_valid)
         self.assertFalse(self.price_collector.molport_api_key_valid)
 
 

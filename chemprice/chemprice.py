@@ -14,15 +14,12 @@ class PriceCollector:
     
     def __init__(self):
         self.login = {
-            'molport_username': None,
-            'molport_password': None,
             'molport_api_key': None,
             'chemspace_api_key': None,
             'mcule_api_key': None,
         }
         self.add_to_the_dictionnary(self)
 
-        self.molport_id_valid = False
         self.molport_api_key_valid = False
         self.chemspace_api_key_valid = False
         self.mcule_api_key_valid = False
@@ -32,30 +29,6 @@ class PriceCollector:
 
     def add_to_the_dictionnary(self, instance):
         PriceCollector.instances.append(instance)
-
-
-#------------------------------------------------------
-
-
-    def setMolportUsername(self, username):
-        """
-        Sets the Molport username.
-
-        :param username: The Molport username to set.
-        """
-        self.login['molport_username'] = username
-
-
-#------------------------------------------------------
-
-
-    def setMolportPassword(self, password):
-        """
-        Sets the Molport password.
-
-        :param password: The Molport password to set.
-        """
-        self.login['molport_password'] = password
 
 
 #------------------------------------------------------
@@ -101,9 +74,7 @@ class PriceCollector:
         Displays the set status of various API keys.
         """
         # Display the set status of various API keys
-        if (self.login['molport_username'] and self.login['molport_password']) and self.login['molport_api_key']:
-            print("Status: Molport : both creditentials are set.")
-        elif (self.login['molport_username'] and self.login['molport_password']) or self.login['molport_api_key']:
+        if self.login['molport_api_key']:
             print("Status: Molport : creditential is set.")
         else:
             print("Status: Molport : no credential is set.")
@@ -137,43 +108,16 @@ class PriceCollector:
         integrator_correct = 0
         
         if Molport:
-            if self.login['molport_username'] and self.login['molport_password']:
-                payload = {
-                    "User Name": self.login['molport_username'],
-                    "Authentication Code": self.login['molport_password'],
-                    "Structure": smiles,
-                    "Search Type": 5,  # Perfect research
-                    "Maximum Search Time": 60000,
-                    "Maximum Result Count": 1000,
-                    "Chemical Similarity Index": 0.9
-                }
-                # Send the request to the Molport server
-                r = requests.post('https://api.molport.com/api/chemical-search/search', json=payload)
-                # Get the Python dictionary from the server response
-                response = r.json()
-                if response["Result"]["Status"] == 1:
-                    self.molport_id_valid = True
-                    print("Check: Molport username and password are correct.")
-                    integrator_correct = 1
-                else:
-                    print("Check: Molport username and/or password are incorrect.")
-                    value_return = 0
-
-
             if self.login['molport_api_key']:
+                # Lightweight credential check via availability-searches (no pricing needed here)
+                headers = {"X-API-Key": self.login['molport_api_key']}
                 payload = {
-                    "API Key": self.login['molport_api_key'],
-                    "Structure": smiles,
-                    "Search Type": 5,  # Perfect research
-                    "Maximum Search Time": 60000,
-                    "Maximum Result Count": 1000,
-                    "Chemical Similarity Index": 0.9
+                    "search_items_type": "smiles",
+                    "search_items": [smiles],
+                    "match_types": ["exact"],
                 }
-                # Send the request to the Molport server
-                r = requests.post('https://api.molport.com/api/chemical-search/search', json=payload)
-                # Get the Python dictionary from the server response
-                response = r.json()
-                if response["Result"]["Status"] == 1:
+                r = requests.post('https://api.molport.com/v1/availability-searches', json=payload, headers=headers)
+                if r.status_code in (200, 201):
                     self.molport_api_key_valid = True
                     print("Check: Molport api key is correct.")
                     integrator_correct = 1
@@ -227,21 +171,32 @@ class PriceCollector:
 #------------------------------------------------------
 
 
-    def collect(self, smiles_list, progress_output=None):
+    def collect(self, smiles_list, progress_output=None, molport_amount=1, molport_measure="g",
+                molport_shipping_country="US", molport_shipping_method="consolidated",
+                molport_match_types=None, molport_selection_method="lowest price"):
         """
         Collects data using API credentials.
 
         :param smiles_list: List of SMILES representations.
         :param progress_output: Progress output (optional).
+        :param molport_amount: Desired quantity per compound for Molport's quote (default 1).
+        :param molport_measure: Unit for molport_amount, "mg" or "g" (default "g").
+        :param molport_shipping_country: Destination country code for Molport's quote (default "US").
+        :param molport_shipping_method: "consolidated" or "direct" (default "consolidated").
+        :param molport_match_types: List of Molport match types, e.g. ["exact"] (default).
+        :param molport_selection_method: How Molport selects among matching offers
+            ("lowest price", "minimum count of shipments", or "best offer"; default "lowest price").
         :return: A DataFrame containing collected data.
         """
         # Determine if Chemspace and/or Molport APIs are valid
         Chemspace = self.chemspace_api_key_valid
-        Molport = self.molport_api_key_valid or self.molport_id_valid
+        Molport = self.molport_api_key_valid
         MCule = self.mcule_api_key_valid
         # Call collect_vendors function with the determined API statuses
-        df = utils.collect_vendors(self, smiles_list, progress_output, Chemspace, Molport, MCule)
-        
+        df = utils.collect_vendors(self, smiles_list, progress_output, Chemspace, Molport, MCule,
+                                    molport_amount, molport_measure, molport_shipping_country,
+                                    molport_shipping_method, molport_match_types, molport_selection_method)
+
         return df
 
 
