@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="600" src="https://i.imgur.com/UHf6OV0.png">
+  <img width="600" src="logo/logo_chemprice_blue.png">
 </p>
 <br />
 
