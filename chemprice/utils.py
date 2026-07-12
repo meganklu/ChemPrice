@@ -129,38 +129,47 @@ def chemspace_get_token(instance):
 
 
 # Collects prices for the given SMILES and coverts them into dataframe
-def chemspace_collect_prices(instance, smiles_list):
+def chemspace_collect_prices(instance, smiles_list, ship_to_country="US"):
     """
-    Collects price data for molecules from ChemSpace API.
+    Collects price data for molecules from ChemSpace's v4 API (POST /v4/search/exact).
 
     :param instance: The PriceCollector instance containing API credentials.
     :param smiles_list: list containing molecule SMILES.
+    :param ship_to_country: Destination country code; required by the v4 API (default "US").
     :type instance: PriceCollector
     :type smiles_list: list
     :return: DataFrame containing collected price data.
     :rtype: pandas.DataFrame
     """
+    columns = ["Source", "Input SMILES", "SMILES", "CAS", "Supplier Name", "Purity", "Amount", "Measure", "Price_USD"]
+
+    if not smiles_list:
+        return pd.DataFrame([], columns=columns)
 
     access_token = chemspace_get_token(instance)
-    url = "https://api.chem-space.com/v3/search/exact"
+    url = "https://api.chem-space.com/v4/search/exact"
     headers = {
-        "Accept": "application/json; version=3.1",
+        "Accept": "application/json; version=4.1",
         "Authorization": "Bearer " + access_token,
     }
     params = {
         "count": 3,
         "page": 1,
-        "categories": "CSCS,CSMB"
+        "categories": "CSMS,CSMB,CSCS,CSSB,CSSS,CSFS",
+        "shipToCountry": ship_to_country,
     }
 
     response_data = []
 
     for index, smiles in tqdm(enumerate(smiles_list),total=len(smiles_list)):
+        # v4 documents multipart/form-data as the only accepted body encoding;
+        # requests' `data=` sends application/x-www-form-urlencoded instead, so
+        # `files=` is used here to force the correct encoding.
         data = {
-            "SMILES": smiles
+            "SMILES": (None, smiles)
         }
 
-        response = requests.post(url, headers=headers, data=data, params=params)
+        response = requests.post(url, headers=headers, files=data, params=params)
 
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
@@ -177,9 +186,13 @@ def chemspace_collect_prices(instance, smiles_list):
             print("Request failed with status code:", response.status_code)
             print("Response content:", response.text)
 
-        # Pause for 1.5 seconds between each request
-        if index < len(smiles_list) - 1:
-            time.sleep(1.5)
+        # ChemSpace reports the real remaining quota on every response; only wait
+        # once it's actually exhausted, rather than guessing a fixed delay.
+        remaining = response.headers.get("X-Rate-Limit-Remaining")
+        reset_seconds = response.headers.get("X-Rate-Limit-Reset")
+        if remaining is not None and reset_seconds is not None and int(remaining) <= 0 \
+                and index < len(smiles_list) - 1:
+            time.sleep(int(reset_seconds))
 
     chemspace_data = []
     
@@ -201,7 +214,7 @@ def chemspace_collect_prices(instance, smiles_list):
 
                     chemspace_data.append((source, input_smiles, smiles, cas, supplier_name, purity, amount, measure, price_usd))
                     
-    df = pd.DataFrame(chemspace_data, columns=["Source", "Input SMILES", "SMILES", "CAS", "Supplier Name", "Purity", "Amount", "Measure", "Price_USD"])
+    df = pd.DataFrame(chemspace_data, columns=columns)
     df = df.dropna(subset=["Price_USD"], how='all')
 
     return df
@@ -495,7 +508,7 @@ def filter_csv_by_min_price(df):
 
 
 def collect_vendors(instance, smiles_list, progress_output=None, ChemSpace=True, Molport=True, MCule=True,
-                     molport_amount=1, molport_measure="g", molport_shipping_country="US",
+                     shipping_country="US", molport_amount=1, molport_measure="g",
                      molport_shipping_method="consolidated", molport_match_types=None,
                      molport_selection_method="lowest price"):
 
@@ -511,7 +524,7 @@ def collect_vendors(instance, smiles_list, progress_output=None, ChemSpace=True,
         # Get the prices and print count from MolPort
         print(f"Collecting Prices for given {len(smiles_list)} SMILES from MolPort...")
         molport_prices = molport_collect_prices(instance, smiles_list, amount=molport_amount,
-                                                  measure=molport_measure, shipping_country=molport_shipping_country,
+                                                  measure=molport_measure, shipping_country=shipping_country,
                                                   shipping_method=molport_shipping_method,
                                                   match_types=molport_match_types,
                                                   selection_method=molport_selection_method)
@@ -525,7 +538,7 @@ def collect_vendors(instance, smiles_list, progress_output=None, ChemSpace=True,
     if ChemSpace:
         # Get the prices and print count from ChemSpace
         print(f"Collecting Prices for given {len(smiles_list)} SMILES from ChemSpace...")
-        chemspace_prices=chemspace_collect_prices(instance, smiles_list)
+        chemspace_prices=chemspace_collect_prices(instance, smiles_list, ship_to_country=shipping_country)
         unique_smiles_count = chemspace_prices['Input SMILES'].nunique()
         smiles_with_price_cs = len(chemspace_prices[chemspace_prices['Price_USD'].notnull()])
         print(f"Total: {smiles_with_price_cs} prices for {unique_smiles_count} molecules are found in ChemSpace.\n")

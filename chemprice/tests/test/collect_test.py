@@ -10,11 +10,13 @@ from chemprice import chemprice as cp
 
 MOLPORT_API_KEY = os.environ.get('MOLPORT_API_KEY')
 MCULE_API_KEY = os.environ.get('MCULE_API_KEY')
+CHEMSPACE_API_KEY = os.environ.get('CHEMSPACE_API_KEY')
 
 # Création d'instances
 instance = cp.PriceCollector()
 instance.login['molport_api_key'] = MOLPORT_API_KEY
 instance.login['mcule_api_key'] = MCULE_API_KEY
+instance.login['chemspace_api_key'] = CHEMSPACE_API_KEY
 
 
 
@@ -153,6 +155,78 @@ class TestMculeCollectPrices(unittest.TestCase):
         # Check the result
         self.assertFalse(result.empty)
         self.assertTrue(set(result['ID'].unique()).issubset(set(molecule_ids['ID'].unique())))
+
+
+
+
+class TestChemspaceCollectPrices(unittest.TestCase):
+
+
+
+
+    def test_empty_smiles_list(self):
+        """
+        Test with no smiles: no HTTP calls (including the token fetch) should be made
+        """
+        # Input data
+        smiles_list = []
+
+        # Function application
+        result = utils.chemspace_collect_prices(instance, smiles_list)
+
+        # Check the result
+        self.assertTrue(result.empty)
+
+
+
+
+    @unittest.skipUnless(CHEMSPACE_API_KEY, "CHEMSPACE_API_KEY is not set")
+    def test_single_smiles(self):
+        """
+        Test with a single SMILES
+        """
+        # Input data
+        smiles_list = ["O=C(C)Oc1ccccc1C(=O)O"] # aspirin
+
+        # Function application
+        result = utils.chemspace_collect_prices(instance, smiles_list)
+
+        # Check the result
+        self.assertFalse(result.empty)
+        self.assertListEqual(list(result.columns),
+            ["Source", "Input SMILES", "SMILES", "CAS", "Supplier Name", "Purity", "Amount", "Measure", "Price_USD"])
+        self.assertTrue((result['Source'] == 'ChemSpace').all())
+        self.assertTrue((result['Input SMILES'] == smiles_list[0]).all())
+
+
+
+
+    @unittest.skipUnless(CHEMSPACE_API_KEY, "CHEMSPACE_API_KEY is not set")
+    def test_all_categories_are_requested(self):
+        """
+        Regression test: the old client only requested categories=CSCS,CSMB,
+        silently dropping 3 of 5 (now 4 of 6) valid catalogue categories.
+        """
+        # Input data
+        smiles_list = ["CC(=O)NC1=CC=C(C=C1)O"] # acetaminophen
+
+        # Function application
+        original_post = utils.requests.post
+        captured_params = {}
+
+        def capture_post(*args, **kwargs):
+            captured_params.update(kwargs.get("params", {}))
+            return original_post(*args, **kwargs)
+
+        utils.requests.post = capture_post
+        try:
+            utils.chemspace_collect_prices(instance, smiles_list)
+        finally:
+            utils.requests.post = original_post
+
+        # Check the result
+        requested_categories = set(captured_params.get("categories", "").split(","))
+        self.assertSetEqual(requested_categories, {"CSMS", "CSMB", "CSCS", "CSSB", "CSSS", "CSFS"})
 
 
 
