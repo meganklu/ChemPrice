@@ -452,10 +452,11 @@ def add_standardized_columns(df):
 
     df['Measure'] = df['Measure'].astype(str)
 
-    # Apply the function to create new columns
-    df['USD/g'] = df.apply(lambda row: standardize_prices(row) if row['Measure'] in ['g', 'mg', 'kg', 'microg', 'ug' ] or re.match(r'\d+x\d+g', row['Measure']) else None, axis=1)
-    df['USD/mol'] = df.apply(lambda row: standardize_prices(row) if row['Measure'] in ['mol', 'micromol', 'mmol', 'kmol', 'umol'] else None, axis=1)
-    df['USD/l'] = df.apply(lambda row: standardize_prices(row) if (row['Measure'] in ['ml', 'microl', 'l', 'mL', 'kl', 'ul']) or re.match(r'\d+x\d+mL', row['Measure']) else None, axis=1)
+    # Apply the function to create new columns. pd.to_numeric coerces the result to a
+    # proper float64/NaN column.
+    df['USD/g'] = pd.to_numeric(df.apply(lambda row: standardize_prices(row) if row['Measure'] in ['g', 'mg', 'kg', 'microg', 'ug' ] or re.match(r'\d+x\d+g', row['Measure']) else None, axis=1), errors='coerce')
+    df['USD/mol'] = pd.to_numeric(df.apply(lambda row: standardize_prices(row) if row['Measure'] in ['mol', 'micromol', 'mmol', 'kmol', 'umol'] else None, axis=1), errors='coerce')
+    df['USD/l'] = pd.to_numeric(df.apply(lambda row: standardize_prices(row) if (row['Measure'] in ['ml', 'microl', 'l', 'mL', 'kl', 'ul']) or re.match(r'\d+x\d+mL', row['Measure']) else None, axis=1), errors='coerce')
 
     # Sort and Save the dataframe with the additional columns to a new CSV file
     df = df.sort_values(by=['Input SMILES', 'USD/g', 'USD/mol', 'USD/l'])
@@ -472,10 +473,10 @@ def filter_csv_by_min_price(df):
     # Remove rows where neither of the two values (USD/g and USD/mol) is present
     df = df.dropna(subset=["USD/g", "USD/mol", "USD/l"], how='all')
 
-    # Filter the rows from the initial dataframe, keeping only those corresponding to the smallest value of "Price_USD"
-    filtered_df_g = df[df.groupby("Input SMILES")["USD/g"].transform(min) == df["USD/g"]]
-    filtered_df_mol = df[df.groupby("Input SMILES")["USD/mol"].transform(min) == df["USD/mol"]]
-    filtered_df_l = df[df.groupby("Input SMILES")["USD/l"].transform(min) == df["USD/l"]]
+    # Filter the rows from the initial dataframe, keeping only those corresponding to the smallest value of "Price_USD".
+    filtered_df_g = df[df.groupby("Input SMILES")["USD/g"].transform('min') == df["USD/g"]]
+    filtered_df_mol = df[df.groupby("Input SMILES")["USD/mol"].transform('min') == df["USD/mol"]]
+    filtered_df_l = df[df.groupby("Input SMILES")["USD/l"].transform('min') == df["USD/l"]]
 
     # If multiple rows have the same price, keep the first one
     filtered_df_g = filtered_df_g.sample(frac=1).groupby("Input SMILES", as_index=False).first()

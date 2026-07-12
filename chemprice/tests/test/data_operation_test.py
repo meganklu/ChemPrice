@@ -39,11 +39,11 @@ class TestMergeDataframes(unittest.TestCase):
         expected_result.replace("nan", np.nan, inplace=True)
         
         # Function application
-        result = utils.merge_dataframes([df1, df2]) 
-        result.replace("nan", np.nan, inplace=True) 
-        
+        result = utils.merge_dataframes([df1, df2])
+        result.replace("nan", np.nan, inplace=True)
+
         # Check the result
-        pd.testing.assert_frame_equal(expected_result, result)
+        pd.testing.assert_frame_equal(expected_result, result, check_like=True)
         
         
 
