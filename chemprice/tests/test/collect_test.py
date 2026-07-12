@@ -9,10 +9,12 @@ from chemprice import utils
 from chemprice import chemprice as cp
 
 MOLPORT_API_KEY = os.environ.get('MOLPORT_API_KEY')
+MCULE_API_KEY = os.environ.get('MCULE_API_KEY')
 
 # Création d'instances
 instance = cp.PriceCollector()
 instance.login['molport_api_key'] = MOLPORT_API_KEY
+instance.login['mcule_api_key'] = MCULE_API_KEY
 
 
 
@@ -89,6 +91,68 @@ class TestMolportCollectPrices(unittest.TestCase):
         # Check the result
         self.assertFalse(result.empty)
         self.assertTrue(set(result['Input SMILES'].unique()).issubset(set(smiles_list)))
+
+
+
+
+class TestMculeCollectPrices(unittest.TestCase):
+
+
+
+
+    def test_empty_ids(self):
+        """
+        Test with no molecule IDs
+        """
+        # Input data
+        molecule_ids = pd.DataFrame({'ID': [], 'Input SMILES': []})
+
+        # Function application
+        result = utils.mcule_collect_prices(instance, molecule_ids)
+
+        # Check the result
+        self.assertTrue(result.empty)
+
+
+
+
+    @unittest.skipUnless(MCULE_API_KEY, "MCULE_API_KEY is not set")
+    def test_single_smiles(self):
+        """
+        Test with a single SMILES
+        """
+        # Input data
+        smiles_list = ["O=C(C)Oc1ccccc1C(=O)O"] # aspirin
+
+        # Function application
+        molecule_ids = utils.mcule_get_ids(instance, smiles_list)
+        result = utils.mcule_collect_prices(instance, molecule_ids)
+
+        # Check the result
+        self.assertFalse(result.empty)
+        self.assertListEqual(list(result.columns),
+            ["Source", "ID", "Supplier Name", "SMILES", "Purity", "Price_USD", "Amount", "Measure"])
+        self.assertTrue((result['Source'] == 'MCule').all())
+        self.assertTrue((result['ID'] == molecule_ids['ID'].iloc[0]).all())
+
+
+
+
+    @unittest.skipUnless(MCULE_API_KEY, "MCULE_API_KEY is not set")
+    def test_multiple_smiles(self):
+        """
+        Test with multiple SMILES
+        """
+        # Input data
+        smiles_list = ["CC(=O)NC1=CC=C(C=C1)O", "O=C(C)Oc1ccccc1C(=O)O"]
+
+        # Function application
+        molecule_ids = utils.mcule_get_ids(instance, smiles_list)
+        result = utils.mcule_collect_prices(instance, molecule_ids)
+
+        # Check the result
+        self.assertFalse(result.empty)
+        self.assertTrue(set(result['ID'].unique()).issubset(set(molecule_ids['ID'].unique())))
 
 
 

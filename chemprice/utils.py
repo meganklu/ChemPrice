@@ -249,144 +249,74 @@ def mcule_get_ids(instance, smiles_list):
 
 
 
-# Function to build packages for multiple amounts
-def build_packages(instance, df):
-    
-    mcule_token = instance.login['mcule_api_key']
-    
-    if df.empty:
-        return
-    # Define the API URL
-    url = "https://mcule.com/api/v1/iquote-queries/"
-
-    # Headers for authorization
-    headers = {
-        "Authorization": "Token " + mcule_token,
-        "Content-Type": "application/json",
-        "Accept": "application/json, */*",
-        "Accept-Encoding": "gzip, deflate"
-    }
-
-    package_ids = []  # List to store package IDs
-
-    amount_list = ["1", "5", "10", "100", "1000", "10000", "100000", "1000000"]
-
-    for index,amount in tqdm(enumerate(amount_list),total=len(amount_list)):
-        # Request body in JSON format
-        data = {
-            "amount": amount,
-            "customer_first_name": "John",
-            "customer_last_name": "Doe",
-            "delivery_country": "US",
-            "mcule_ids": df["ID"].tolist(),
-            "min_amount": None
-        }
-
-        # Send the POST request
-        response = requests.post(url, json=data, headers=headers)
-
-        # Check the response
-        if response.status_code == 201:  # Status code 201 for Created
-            results = response.json()
-            package_id = results["id"]
-            package_ids.append(package_id)  # Add package ID to the list
-        else:
-            print("POST request failed for amount:", amount)
-            print("Response code:", response.status_code)
-            print(response.text)
-
-    return package_ids
-
-
-######################################################################
-######################################################################
-
-
-# Function to get quotes
-def get_quotes(token, quote):
-    for quote_data in quote.get('group', {}).get('quotes', []):
-        quote_id = quote_data['id']
-        headers = {
-            'Authorization': f'Token {token}',
-            'Content-Type': 'application/json',
-        }
-        url = f'https://mcule.com/api/v1/iquotes/{quote_id}/'
-        response = requests.get(url, headers=headers)
-        yield response.json()
-
-
-# Function to collect prices and data from MCule API
-def mcule_collect_prices(instance, package_ids):
+# Collects prices for the given MCule IDs from the Compound List Details API
+def mcule_collect_prices(instance, molecule_ids_df, price_amounts=(1, 10, 100, 500, 1000)):
     """
-    Collects price data for molecules from MCule API.
+    Collects price data for molecules from MCule's Compound List Details API
+    (POST /api/v1/compounds/).
+
+    price_amounts is technically optional at the API level, but omitting it
+    means the response has no best_prices at all (just structural/property
+    data) -- since this function's job is prices, it's always sent.
+
+    Batches requests at 50 IDs each (the limit once price_amounts is requested)
+    and self-throttles to stay under the endpoint's 5 requests/minute burst limit.
+    Sustained usage is capped at 200 requests/day by MCule; this is not tracked
+    across separate runs, so very large batches spread across many collect()
+    calls in one day could still exceed it.
 
     :param instance: The PriceCollector instance containing API credentials.
-    :param package_ids: list containing molecule package IDs.
+    :param molecule_ids_df: DataFrame containing MCule IDs and SMILES (see mcule_get_ids).
+    :param price_amounts: Amounts in mg to request prices for (max 5 values, each <= 1000).
     :type instance: PriceCollector
-    :type package_ids: list
+    :type molecule_ids_df: pandas.DataFrame
     :return: DataFrame containing collected price data.
     :rtype: pandas.DataFrame
     """
-    
-    token = instance.login['mcule_api_key']
-    
-    data = []
-    
-    if package_ids is None:
-        # Create a DataFrame with collected data
-        df = pd.DataFrame(data, columns=["Source", "ID", "Supplier Name", "SMILES", "Purity", "Price_USD", "Amount", "Measure"])
-        return df
+    columns = ["Source", "ID", "Supplier Name", "SMILES", "Purity", "Price_USD", "Amount", "Measure"]
 
-    # Define headers for authorization
+    if molecule_ids_df.empty:
+        return pd.DataFrame([], columns=columns)
+
+    token = instance.login['mcule_api_key']
     headers = {
-        'Authorization': f'Token {token}',
+        'Authorization': 'Token ' + token,
         'Content-Type': 'application/json',
     }
 
-    for index, package_id in tqdm(enumerate(package_ids),total=len(package_ids)):
+    ids = molecule_ids_df["ID"].tolist()
+    data = []
+    request_times = []
 
-        # Construct the URL for the specific quote request
-        url = f'https://mcule.com/api/v1/iquote-queries/{package_id}/'
+    for i in tqdm(range(0, len(ids), 50)):
+        batch = ids[i:i + 50]
 
-        # Function to check the status of the quote request
-        def check_status():
-            response_package = requests.get(url, headers=headers).json()
-            status = response_package['state']
-            if status == 40:
-                return None
-            elif status == 30 and response_package['group']:
-                return response_package
-            elif status == 30 and not response_package['group']:
-                return None
-            else:
-                return 1
+        # Stay under the 5 requests/minute burst limit: drop timestamps
+        # older than 60s, and if 5 remain, wait for the oldest to age out.
+        now = time.time()
+        request_times = [t for t in request_times if now - t < 60]
+        if len(request_times) >= 5:
+            time.sleep(60 - (now - request_times[0]))
+        request_times.append(time.time())
 
-        response_package = check_status()
-        while response_package == 1:
-            time.sleep(0.5)
-            response_package = check_status()
+        payload = {
+            "mcule_ids": batch,
+            "price_amounts": list(price_amounts),
+        }
+        response = requests.post('https://mcule.com/api/v1/compounds/', headers=headers, json=payload)
 
-        if response_package is None:
+        if response.status_code != 200:
+            print(f'Error in the request for MCule batch starting at {i}: {response.status_code}')
             continue
 
-        for quote in get_quotes(token, response_package):
-            # Extract values from each product item in the quote
-            product_items = quote.get('items', [])
+        for compound in response.json().get("results", []):
+            mcule_id = compound.get("mcule_id")
+            smiles = compound.get("smiles")
+            for price in compound.get("best_prices", []):
+                data.append(("MCule", mcule_id, "", smiles, price.get("purity", ""),
+                             price.get("price", ""), price.get("amount", ""), price.get("unit", "")))
 
-            for item in product_items:
-                source = "MCule"
-                mcule_id = item.get('structure_origin_mcule_id')
-                product_supplier_name = item.get('product_supplier_name')
-                smiles = item.get('product_smiles')
-                purity = item.get('product_purity')
-                price = item.get('product_price')
-                amount = item.get('amount')
-                measure = "mg"
-                data.append((source, mcule_id, product_supplier_name, smiles, purity, price, amount, measure))
-
-    # Create a DataFrame with collected data
-    df = pd.DataFrame(data, columns=["Source", "ID", "Supplier Name", "SMILES", "Purity", "Price_USD", "Amount", "Measure"])
-
+    df = pd.DataFrame(data, columns=columns)
     return df
 
 # Merges two dataframes
@@ -609,15 +539,14 @@ def collect_vendors(instance, smiles_list, progress_output=None, ChemSpace=True,
         print(f"Collecting ID's for given {len(smiles_list)} SMILES from MCule...")
         df_molecule_ids = mcule_get_ids(instance, smiles_list)
         smiles_exists = df_molecule_ids['Input SMILES'].nunique()
-        package_id = build_packages(instance, df_molecule_ids)
         print(f"Total: {smiles_exists} molecules and {len(df_molecule_ids)} conformers are found in MCule.\n")
         progress += 1/(2*nb_integrator)
         if progress_output is not None:
-            progress_output.append(progress) 
+            progress_output.append(progress)
 
         # Get the prices and print count from MCule
         print(f"Collecting Prices for given {len(smiles_list)} IDs from MCule...")
-        mcule_prices = mcule_collect_prices(instance, package_id)
+        mcule_prices = mcule_collect_prices(instance, df_molecule_ids)
         mcule_prices = add_input_smiles_columns(df_molecule_ids, mcule_prices)
         smiles_with_price = mcule_prices.loc[mcule_prices['Price_USD'].notnull(), 'Input SMILES'].nunique()
         print(f"Total: {len(mcule_prices)} prices for {smiles_with_price} molecules are found in MCule.\n")
