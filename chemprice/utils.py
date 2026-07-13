@@ -83,7 +83,7 @@ def molport_collect_prices(instance, smiles_list, amount=1, min_amount=None, mea
     # with no price fields at all, rather than being omitted from the array.
     molport_data = [
         ("Molport", item.get("search_query", ""), item.get("smiles", ""), item.get("supplier_name", ""),
-         item.get("purity", ""), item.get("qty", ""), item.get("unit", ""), item.get("net_price", ""))
+         item.get("purity", ""), item.get("qty", ""), item.get("unit", "").strip(), item.get("net_price", ""))
         for item in results if item.get("status") == "found"
     ]
 
