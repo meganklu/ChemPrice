@@ -423,7 +423,7 @@ def extract_unit_bulk(unit_string):
     parts = re.search(r'(\d+)x(\d+)(\D+)', unit_string)
     if parts:
         bulk = int(parts.group(1)) * int(parts.group(2))
-        unit = parts.group(3).lower()
+        unit = parts.group(3).strip().lower()
         return bulk, unit
     else:
         bulk = re.search(r'\d+', unit_string)
@@ -463,7 +463,9 @@ def add_standardized_columns(df):
         df['USD/l'] = ''
         return df
 
-    df['Measure'] = df['Measure'].astype(str)
+    # Some APIs (e.g. Molport) return unit strings with stray whitespace
+    # (e.g. " g" instead of "g"), which breaks exact-match lookups below.
+    df['Measure'] = df['Measure'].astype(str).str.strip()
 
     # Apply the function to create new columns. pd.to_numeric coerces the result to a
     # proper float64/NaN column.
