@@ -171,17 +171,18 @@ class PriceCollector:
 #------------------------------------------------------
 
 
-    def collect(self, smiles_list, progress_output=None, molport_amount=1, molport_measure="g",
-                molport_shipping_country="US", molport_shipping_method="consolidated",
+    def collect(self, smiles_list, progress_output=None, shipping_country="US", molport_amount=1,
+                molport_measure="g", molport_shipping_method="consolidated",
                 molport_match_types=None, molport_selection_method="lowest price"):
         """
         Collects data using API credentials.
 
         :param smiles_list: List of SMILES representations.
         :param progress_output: Progress output (optional).
+        :param shipping_country: Destination country code, shared by Molport's and ChemSpace's
+            quotes since both need one (default "US").
         :param molport_amount: Desired quantity per compound for Molport's quote (default 1).
         :param molport_measure: Unit for molport_amount, "mg" or "g" (default "g").
-        :param molport_shipping_country: Destination country code for Molport's quote (default "US").
         :param molport_shipping_method: "consolidated" or "direct" (default "consolidated").
         :param molport_match_types: List of Molport match types, e.g. ["exact"] (default).
         :param molport_selection_method: How Molport selects among matching offers
@@ -194,7 +195,7 @@ class PriceCollector:
         MCule = self.mcule_api_key_valid
         # Call collect_vendors function with the determined API statuses
         df = utils.collect_vendors(self, smiles_list, progress_output, Chemspace, Molport, MCule,
-                                    molport_amount, molport_measure, molport_shipping_country,
+                                    shipping_country, molport_amount, molport_measure,
                                     molport_shipping_method, molport_match_types, molport_selection_method)
 
         return df

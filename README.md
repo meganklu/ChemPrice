@@ -115,16 +115,17 @@ for quantities are categorized into three families: mols, grams, and liters.
 all_prices = pc.collect(smiles_list)
 ```
 
-Molport's search is a quote, not a raw catalog dump, so it needs to know how much of each
-compound you want and where it would ship to. `collect()` exposes this as optional
-keyword arguments, defaulting to a 1 g, US-shipped, exact-match, lowest-price quote:
+Molport's and ChemSpace's searches are quotes, not raw catalog dumps, so they need to know
+where the order would ship to; Molport additionally needs to know how much of each compound
+you want. `collect()` exposes this as optional keyword arguments, defaulting to a 1 g,
+US-shipped, exact-match, lowest-price quote:
 
 ```python
 all_prices = pc.collect(
     smiles_list,
+    shipping_country="US",
     molport_amount=1,
     molport_measure="g",
-    molport_shipping_country="US",
     molport_shipping_method="consolidated",
     molport_match_types=["exact"],
     molport_selection_method="lowest price",
