@@ -10,6 +10,20 @@ from tqdm import tqdm
 ######################################################################
 
 
+# Molport's "unit" field encodes the pack size the price is quoted for, as a
+# combined "<amount> <unit>" string (e.g. "5 g", "25 g", "10 mL") -- it is not
+# a bare unit like other vendors return. "qty" is how many of that pack were
+# selected, so the amount actually priced is qty * pack size.
+def _parse_molport_pack_size(unit_string, qty):
+    match = re.search(r'([\d.]+)\s*([a-zA-Z]+)', str(unit_string))
+    if not match:
+        return "", ""
+    pack_size = float(match.group(1))
+    unit = match.group(2).lower()
+    qty = float(qty) if qty not in (None, "") else 1.0
+    return qty * pack_size, unit
+
+
 # Collects prices for the given SMILES from Molport's v1 list-searches API
 def molport_collect_prices(instance, smiles_list, amount=1, min_amount=None, measure="g", shipping_country="US",
                             shipping_method="consolidated", match_types=None, selection_method="lowest price",
@@ -81,11 +95,15 @@ def molport_collect_prices(instance, smiles_list, amount=1, min_amount=None, mea
 
     # Unmatched SMILES come back as {"search_query": ..., "status": "not found"}
     # with no price fields at all, rather than being omitted from the array.
-    molport_data = [
-        ("Molport", item.get("search_query", ""), item.get("smiles", ""), item.get("supplier_name", ""),
-         item.get("purity", ""), item.get("qty", ""), item.get("unit", "").strip(), item.get("net_price", ""))
-        for item in results if item.get("status") == "found"
-    ]
+    molport_data = []
+    for item in results:
+        if item.get("status") != "found":
+            continue
+        amount, unit = _parse_molport_pack_size(item.get("unit", ""), item.get("qty", ""))
+        molport_data.append((
+            "Molport", item.get("search_query", ""), item.get("smiles", ""), item.get("supplier_name", ""),
+            item.get("purity", ""), amount, unit, item.get("net_price", "")
+        ))
 
     # Create a DataFrame with collected data
     df = pd.DataFrame(molport_data, columns=columns)
@@ -437,6 +455,8 @@ def extract_unit_bulk(unit_string):
             unit = unit.group().lower()
         else:
             return None, None
+
+        return bulk, unit
 
 #Convert all prices into USD/g or USD/mol or USD/l
 def standardize_prices(row):
